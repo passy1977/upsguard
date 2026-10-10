@@ -23,6 +23,8 @@ APCCONTROL="/etc/apcupsd/apccontrol"        # apccontrol of the apcupsd package
 STATE_DIR="/run/upsguard"                   # state between events (cleared at boot)
 COMM_GRACE=120                              # seconds of lost USB link before the mail
                                             # (hides the short loss after a resume)
+BATT_GRACE=60                               # seconds of battery detached before the mail
+                                            # (the BX series reports spurious detaches)
 CHANGEME_REPEAT_MIN=1440                    # repeat the "replace battery" mail once a day
 MAIL_WAIT=30                                # seconds to wait for postfix before shutdown
 
@@ -76,6 +78,35 @@ flush_mail() {
     done
 }
 
+# Mails only if the condition $1 is still set after $2 seconds:
+# the matching clear_condition removes it before then for a short glitch
+defer_mail() {
+    cond="$STATE_DIR/$1"
+    grace="$2"
+    shift 2
+    # Token: a sleeper left over from an earlier glitch must not see a new one
+    token="$(date +%s).$$"
+    echo "$token" > "$cond"
+    (
+        sleep "$grace"
+        if [ "$(cat "$cond" 2>/dev/null)" = "$token" ] && [ ! -e "$cond.mailed" ]; then
+            touch "$cond.mailed"
+            send_mail "$@"
+        fi
+    ) </dev/null >/dev/null 2>&1 &
+}
+
+# Clears the condition $1; mails only if defer_mail had mailed it
+clear_condition() {
+    cond="$STATE_DIR/$1"
+    shift
+    rm -f "$cond"
+    if [ -e "$cond.mailed" ]; then
+        rm -f "$cond.mailed"
+        send_mail "$@"
+    fi
+}
+
 delegate() {
     [ -x "$APCCONTROL" ] && exec "$APCCONTROL" "$@"
     echo "upsguard-event: $APCCONTROL not found" >&2
@@ -106,26 +137,15 @@ case "$EVENT" in
         ;;
 
     commfailure)
-        # A short loss of the USB link (e.g. on resume from suspend) is normal:
-        # mail only if the link is still down after COMM_GRACE seconds
-        date +%s > "$STATE_DIR/commfailure"
-        (
-            sleep "$COMM_GRACE"
-            if [ -e "$STATE_DIR/commfailure" ] && [ ! -e "$STATE_DIR/commfailure.mailed" ]; then
-                touch "$STATE_DIR/commfailure.mailed"
-                send_mail "communication lost" \
-                    "Communication with $UPS lost for more than $COMM_GRACE seconds." \
-                    "A shutdown on low battery is NOT possible until it comes back."
-            fi
-        ) </dev/null >/dev/null 2>&1 &
+        # A short loss of the USB link (e.g. on resume from suspend) is normal
+        defer_mail commfailure "$COMM_GRACE" "communication lost" \
+            "Communication with $UPS lost for more than $COMM_GRACE seconds." \
+            "A shutdown on low battery is NOT possible until it comes back."
         ;;
 
     commok)
-        rm -f "$STATE_DIR/commfailure"
-        if [ -e "$STATE_DIR/commfailure.mailed" ]; then
-            rm -f "$STATE_DIR/commfailure.mailed"
-            send_mail "communication restored" "Communication with $UPS restored."
-        fi
+        clear_condition commfailure "communication restored" \
+            "Communication with $UPS restored."
         ;;
 
     failing)
@@ -161,11 +181,14 @@ case "$EVENT" in
         ;;
 
     battdetach)
-        send_mail "battery disconnected" "The battery of $UPS has been disconnected."
+        # The BX series reports a detach that clears within a second
+        defer_mail battdetach "$BATT_GRACE" "battery disconnected" \
+            "The battery of $UPS has been disconnected for more than $BATT_GRACE seconds."
         ;;
 
     battattach)
-        send_mail "battery reconnected" "The battery of $UPS has been reconnected."
+        clear_condition battdetach "battery reconnected" \
+            "The battery of $UPS has been reconnected."
         ;;
 
     doshutdown)

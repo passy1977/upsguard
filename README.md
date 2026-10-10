@@ -41,13 +41,16 @@ runs `upsguard-event`:
 | `commok` (after the above)    | `[host] UPS: communication restored` |
 | `loadlimit`, `runlimit`, `timeout`, `failing`, `emergency`, `remotedown` | `[host] UPS: SHUTDOWN` |
 | `changeme` (once a day)       | `[host] UPS: REPLACE BATTERY`        |
-| `battdetach` / `battattach`   | `[host] UPS: battery disconnected` / `reconnected` |
+| `battdetach` (> 60 s) / `battattach` | `[host] UPS: battery disconnected` / `reconnected` |
 
 Every mail ends with the UPS status (`apcaccess`): charge, load, estimated
 runtime, last transfer.
 
 A loss of the USB link shorter than `COMM_GRACE` (120 s) sends no mail: this
-happens on resume from suspend.
+happens on resume from suspend. In the same way a battery detach shorter than
+`BATT_GRACE` (60 s) sends no mail: the BX series reports a spurious
+"Battery disconnected" / "Battery reattached" pair every minute or so, still
+visible in `/var/log/apcupsd.events`.
 
 `doshutdown`, `doreboot` and `killpower` are handed to `/etc/apcupsd/apccontrol`
 of the package. Before `doshutdown` the script waits up to 30 seconds for
@@ -82,6 +85,7 @@ cp .env.sample .env
 |--------------|---------|
 | `MAILTO`     | mail recipient |
 | `COMM_GRACE` | seconds of lost USB link before the mail (optional, default 120) |
+| `BATT_GRACE` | seconds of battery detached before the mail (optional, default 60) |
 
 Shutdown thresholds and UPS settings are in `/etc/upsguard/apcupsd.conf`
 (`man apcupsd.conf`). After a change: `sudo sv restart upsguard`.
