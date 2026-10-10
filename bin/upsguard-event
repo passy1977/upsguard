@@ -29,6 +29,11 @@ CHANGEME_GRACE=120                          # seconds before checking the "repla
                                             # (the BX series raises it for an instant)
 CHANGEME_REPEAT_MIN=1440                    # repeat the "replace battery" mail once a day
 MAIL_WAIT=30                                # seconds to wait for postfix before shutdown
+CONFIRM_SEC=30                              # seconds the battery must stay critical before
+                                            # a shutdown is carried out (the BX series
+                                            # reports a false LOWBATT on every transfer)
+CONFIRM_POLL=3                              # interval between two checks (seconds)
+CANCEL_REPEAT_MIN=60                        # at most one "shutdown cancelled" mail per hour
 
 [ -r /etc/upsguard.env ] && . /etc/upsguard.env
 
@@ -109,6 +114,57 @@ clear_condition() {
     fi
 }
 
+# Value of an apcaccess field, without the unit
+field() {
+    printf '%s\n' "$STATUS_DUMP" | awk -F': *' -v k="$1" '
+        { sub(/ +$/, "", $1) }
+        $1 == k { split($2, a, " "); print a[1]; exit }'
+}
+
+# True if the UPS is really running out of battery right now: on battery, battery
+# present, and low battery reported or a limit of apcupsd.conf reached.
+# Without an answer from apcupsd it errs on the side of the shutdown.
+battery_critical() {
+    STATUS_DUMP="$(apcaccess 2>/dev/null)"
+    [ -n "$STATUS_DUMP" ] || return 0
+    st=" $(printf '%s\n' "$STATUS_DUMP" | sed -n 's/^STATUS *: *//p') "
+    case "$st" in *" ONBATT "*) ;; *) return 1 ;; esac
+    case "$st" in *" NOBATT "*) return 1 ;; esac
+    case "$st" in *" LOWBATT "*) return 0 ;; esac
+    charge="$(field BCHARGE)";  charge="${charge%%.*}"
+    left="$(field TIMELEFT)";   left="${left%%.*}"
+    mincharge="$(field MBATTCHG)"
+    minleft="$(field MINTIMEL)"
+    [ -n "$charge" ] && [ -n "$mincharge" ] && [ "$charge" -le "$mincharge" ] && return 0
+    [ -n "$left" ] && [ -n "$minleft" ] && [ "$left" -le "$minleft" ] && return 0
+    return 1
+}
+
+# True if battery_critical holds for CONFIRM_SEC seconds without interruption
+confirm_critical() {
+    waited=0
+    while :; do
+        battery_critical || return 1
+        [ "$waited" -ge "$CONFIRM_SEC" ] && return 0
+        sleep "$CONFIRM_POLL"
+        waited=$(( waited + CONFIRM_POLL ))
+    done
+}
+
+# Undoes what apcupsd did when it started the shutdown and restarts it, so
+# that it is ready to start a new one
+cancel_shutdown() {
+    rm -f /etc/apcupsd/powerfail /etc/nologin
+    mark="$STATE_DIR/cancelled"
+    if [ -z "$(find "$mark" -mmin -"$CANCEL_REPEAT_MIN" 2>/dev/null)" ]; then
+        touch "$mark"
+        send_mail "shutdown cancelled" \
+            "apcupsd started a shutdown ($1), but the battery was not critical" \
+            "for $CONFIRM_SEC seconds: false alarm from $UPS, shutdown cancelled."
+    fi
+    setsid sv restart upsguard </dev/null >/dev/null 2>&1 &
+}
+
 delegate() {
     [ -x "$APCCONTROL" ] && exec "$APCCONTROL" "$@"
     echo "upsguard-event: $APCCONTROL not found" >&2
@@ -150,28 +206,9 @@ case "$EVENT" in
             "Communication with $UPS restored."
         ;;
 
-    failing)
-        send_mail "SHUTDOWN" "Battery power exhausted on $UPS. Shutting down."
-        ;;
-
-    loadlimit)
-        send_mail "SHUTDOWN" "Battery charge below BATTERYLEVEL on $UPS. Shutting down."
-        ;;
-
-    runlimit)
-        send_mail "SHUTDOWN" "Battery runtime below MINUTES on $UPS. Shutting down."
-        ;;
-
-    timeout)
-        send_mail "SHUTDOWN" "Time on battery exceeded TIMEOUT on $UPS. Shutting down."
-        ;;
-
-    emergency)
-        send_mail "SHUTDOWN" "Emergency shutdown: possible battery failure on $UPS."
-        ;;
-
-    remotedown)
-        send_mail "SHUTDOWN" "Remote shutdown requested."
+    failing|loadlimit|runlimit|timeout|emergency|remotedown)
+        # Reason of the doshutdown that follows: the mail is sent by doshutdown
+        echo "$EVENT" > "$STATE_DIR/reason"
         ;;
 
     changeme)
@@ -200,6 +237,29 @@ case "$EVENT" in
         ;;
 
     doshutdown)
+        # The reason event is started together with doshutdown: give it time
+        sleep 1
+        reason="$(cat "$STATE_DIR/reason" 2>/dev/null)"
+        rm -f "$STATE_DIR/reason"
+        case "$reason" in
+            timeout|remotedown) ;;
+            *)
+                if ! confirm_critical; then
+                    cancel_shutdown "${reason:-unknown reason}"
+                    exit 0
+                fi
+                ;;
+        esac
+        case "$reason" in
+            failing)    why="Battery power exhausted on $UPS." ;;
+            loadlimit)  why="Battery charge below BATTERYLEVEL on $UPS." ;;
+            runlimit)   why="Battery runtime below MINUTES on $UPS." ;;
+            timeout)    why="Time on battery exceeded TIMEOUT on $UPS." ;;
+            emergency)  why="Emergency shutdown: possible battery failure on $UPS." ;;
+            remotedown) why="Remote shutdown requested." ;;
+            *)          why="Shutdown requested by apcupsd." ;;
+        esac
+        send_mail "SHUTDOWN" "$why Shutting down."
         flush_mail
         delegate "$@"
         ;;

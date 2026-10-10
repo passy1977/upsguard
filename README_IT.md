@@ -39,7 +39,8 @@ esegue `upsguard-event`:
 | `offbattery`                  | `[host] UPS: power restored`         |
 | `commfailure` (> 120 s)       | `[host] UPS: communication lost`     |
 | `commok` (dopo il precedente) | `[host] UPS: communication restored` |
-| `loadlimit`, `runlimit`, `timeout`, `failing`, `emergency`, `remotedown` | `[host] UPS: SHUTDOWN` |
+| `doshutdown` (confermato) | `[host] UPS: SHUTDOWN` |
+| `doshutdown` (falso allarme) | `[host] UPS: shutdown cancelled` |
 | `changeme` (ancora attivo dopo 120 s, una volta al giorno) | `[host] UPS: REPLACE BATTERY`     |
 | `battdetach` (> 60 s) / `battattach` | `[host] UPS: battery disconnected` / `reconnected` |
 
@@ -56,8 +57,9 @@ la mail solo se il flag (bit 0x80 di `STATFLAG`) e' ancora attivo dopo 120
 secondi.
 
 `doshutdown`, `doreboot` e `killpower` vengono passati a `/etc/apcupsd/apccontrol`
-del pacchetto. Prima di `doshutdown` lo script aspetta fino a 30 secondi che
-postfix consegni la mail.
+del pacchetto. `doshutdown` viene eseguito solo se la batteria e' davvero
+critica (vedi sotto); prima lo script aspetta fino a 30 secondi che postfix
+consegni la mail.
 
 ### Spegnimento a batteria
 
@@ -71,6 +73,26 @@ Lo spegnimento parte al primo limite raggiunto:
 
 I default di apcupsd (5% / 3 minuti) sono troppo stretti per una batteria
 piccola come quella del BX750MI.
+
+### Falsa batteria scarica (serie BX)
+
+A ogni passaggio a batteria (blackout, calo di tensione, l'autotest automatico
+all'accensione e ogni 14 giorni) il BX750MI segnala per qualche secondo
+`ONBATT LOWBATT REPLACEBATT NOBATT`, con la carica ancora al 100%. apcupsd 3.14
+lo interpreta come "Battery power exhausted" e spegne il sistema in pochi
+secondi; non ha un'opzione per ignorare la batteria scarica segnalata dall'UPS.
+
+Per questo `doshutdown` viene eseguito solo dopo `CONFIRM_SEC` (30) secondi in
+cui la batteria resta critica a ogni controllo (ogni 3 secondi): a batteria,
+batteria presente (niente `NOBATT`) e `LOWBATT` oppure carica/autonomia pari o
+sotto `BATTERYLEVEL`/`MINUTES`. Altrimenti lo spegnimento viene annullato:
+`/etc/apcupsd/powerfail` e `/etc/nologin` vengono rimossi, apcupsd viene
+riavviato perche' possa avviare un nuovo spegnimento e parte una mail
+`[host] UPS: shutdown cancelled` (al massimo una all'ora). Se apcupsd non
+risponde, lo spegnimento procede. `timeout` e `remotedown` non vengono
+verificati.
+
+La mail `SHUTDOWN` parte solo quando lo spegnimento e' confermato.
 
 Durante lo spegnimento apcupsd lascia il flag `/etc/apcupsd/powerfail`.
 `/etc/runit/shutdown.d/89-apcupsd-powerfail.sh` (del pacchetto apcupsd) spegne

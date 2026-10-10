@@ -39,7 +39,8 @@ runs `upsguard-event`:
 | `offbattery`                  | `[host] UPS: power restored`         |
 | `commfailure` (> 120 s)       | `[host] UPS: communication lost`     |
 | `commok` (after the above)    | `[host] UPS: communication restored` |
-| `loadlimit`, `runlimit`, `timeout`, `failing`, `emergency`, `remotedown` | `[host] UPS: SHUTDOWN` |
+| `doshutdown` (confirmed) | `[host] UPS: SHUTDOWN` |
+| `doshutdown` (false alarm) | `[host] UPS: shutdown cancelled` |
 | `changeme` (still set after 120 s, once a day) | `[host] UPS: REPLACE BATTERY`        |
 | `battdetach` (> 60 s) / `battattach` | `[host] UPS: battery disconnected` / `reconnected` |
 
@@ -55,8 +56,9 @@ visible in `/var/log/apcupsd.events`. Sometimes the same glitch raises
 flag (bit 0x80 of `STATFLAG`) is still set after 120 seconds.
 
 `doshutdown`, `doreboot` and `killpower` are handed to `/etc/apcupsd/apccontrol`
-of the package. Before `doshutdown` the script waits up to 30 seconds for
-postfix to deliver the mail.
+of the package. `doshutdown` is carried out only if the battery is really
+critical (see below); before it the script waits up to 30 seconds for postfix
+to deliver the mail.
 
 ### Shutdown on battery
 
@@ -70,6 +72,25 @@ The shutdown starts at the first limit reached:
 
 The apcupsd defaults (5% / 3 minutes) are too tight for a small battery like
 the BX750MI.
+
+### False low battery (BX series)
+
+On every transfer to battery (power failure, voltage dip, the automatic
+self-test at power-on and every 14 days) the BX750MI reports for a few seconds
+`ONBATT LOWBATT REPLACEBATT NOBATT`, with the charge still at 100%. apcupsd
+3.14 reads it as "Battery power exhausted" and shuts the system down within
+seconds; it has no option to ignore the low battery reported by the UPS.
+
+So `doshutdown` is carried out only after `CONFIRM_SEC` (30) seconds in which
+the battery stays critical at every check (every 3 seconds): on battery,
+battery present (no `NOBATT`) and `LOWBATT` or charge/runtime at or below
+`BATTERYLEVEL`/`MINUTES`. Otherwise the shutdown is cancelled:
+`/etc/apcupsd/powerfail` and `/etc/nologin` are removed, apcupsd is restarted
+so that it can start a new shutdown, and a `[host] UPS: shutdown cancelled` mail
+is sent (at most one per hour). If apcupsd does not answer, the shutdown goes
+ahead. `timeout` and `remotedown` are not checked.
+
+The `SHUTDOWN` mail is sent only when the shutdown is confirmed.
 
 During the shutdown apcupsd leaves the `/etc/apcupsd/powerfail` flag.
 `/etc/runit/shutdown.d/89-apcupsd-powerfail.sh` (from the apcupsd package) then
