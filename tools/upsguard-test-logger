@@ -1,0 +1,25 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 Antonio Salsi
+#
+# upsguard-test-logger - records the UPS status during a power test
+#
+# Usage:   upsguard-test-logger [minutes] [file]
+#
+# Writes STATUS, LINEV, BCHARGE and TIMELEFT every 2 seconds for <minutes>
+# (default 15) to <file> (default ~/upsguard-test.log). Start it detached, so
+# that it survives the loss of the network during the test:
+#   setsid nohup upsguard-test-logger >/dev/null 2>&1 </dev/null &
+
+MINUTES="${1:-15}"
+LOG="${2:-$HOME/upsguard-test.log}"
+INTERVAL=2
+
+end=$(( $(date +%s) + MINUTES * 60 ))
+echo "=== start $(date '+%F %T')" > "$LOG"
+while [ "$(date +%s)" -lt "$end" ]; do
+    s="$(apcaccess 2>/dev/null | awk -F': *' '/^(STATUS|BCHARGE|TIMELEFT|LINEV)/ {gsub(/ +$/,"",$2); printf "%s=%s  ", $1, $2}')"
+    echo "$(date '+%T')  ${s:-apcupsd not answering}" >> "$LOG"
+    sleep "$INTERVAL"
+done
+echo "=== end $(date '+%F %T')" >> "$LOG"

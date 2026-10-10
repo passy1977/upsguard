@@ -37,6 +37,7 @@ fi
 install -m 644 .env /etc/upsguard.env
 
 install -m 755 bin/upsguard-event /usr/local/bin/upsguard-event
+install -m 755 tools/upsguard-test-logger /usr/local/bin/upsguard-test-logger
 
 install -d -m 755 /etc/upsguard
 install -m 755 etc/apccontrol /etc/upsguard/apccontrol

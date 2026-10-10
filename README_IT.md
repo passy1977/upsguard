@@ -12,6 +12,7 @@ batteria si sta esaurendo. Configurato per un **APC Back-UPS BX750MI** sul serve
 | File nel progetto         | Installato in                    | Ruolo |
 |---------------------------|----------------------------------|-------|
 | `bin/upsguard-event`      | `/usr/local/bin/upsguard-event`  | gestore degli eventi: mail, poi l'azione predefinita di apcupsd |
+| `tools/upsguard-test-logger` | `/usr/local/bin/upsguard-test-logger` | registra lo stato dell'UPS durante una prova di blackout |
 | `etc/apccontrol`          | `/etc/upsguard/apccontrol`       | chiamato da apcupsd a ogni evento, esegue `upsguard-event` |
 | `etc/apcupsd.conf`        | `/etc/upsguard/apcupsd.conf`     | configurazione di apcupsd (UPS, soglie di spegnimento) |
 | `sv/upsguard/run`         | `/etc/sv/upsguard/run`           | servizio runit che esegue apcupsd con quella configurazione |
@@ -164,8 +165,24 @@ cat /var/log/apcupsd.events              # storico degli eventi
 grep apcupsd /var/log/socklog/daemon/current   # log di apcupsd
 ```
 
-Per provare un vero blackout, staccare l'UPS dalla presa per un minuto: arriva
-la mail `ON BATTERY` e, dopo averlo ricollegato, `power restored`.
+## Prova di blackout
+
+Durante la prova la rete puo' cadere (se il router non e' sotto UPS), quindi
+prima avviare il registratore staccato dalla sessione:
+
+```sh
+setsid nohup upsguard-test-logger >/dev/null 2>&1 </dev/null &
+```
+
+Registra `STATUS`, `LINEV`, `BCHARGE` e `TIMELEFT` ogni 2 secondi per 15 minuti
+in `~/upsguard-test.log` (`upsguard-test-logger [minuti] [file]`). Poi staccare
+l'UPS dalla presa per due minuti e ricollegarlo.
+
+Atteso: la mail `ON BATTERY` dopo circa 6 secondi, `power restored` al ritorno
+della corrente, e il sistema resta acceso (`uptime`). Se l'UPS manda il falso
+`LOWBATT`, arriva `shutdown cancelled` circa 30 secondi dopo il blackout.
+
+I risultati delle prove fatte sono in [tests/](tests/).
 
 ## Disinstallazione
 

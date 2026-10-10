@@ -13,7 +13,7 @@
 set -e
 
 VERSION="1.0"
-REVISION="5"
+REVISION="6"
 PKGVER="upsguard-${VERSION}_${REVISION}"
 
 TOP="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -24,6 +24,7 @@ trap 'rm -rf "$DESTDIR"' EXIT
 cd "$TOP"
 
 install -Dm755 bin/upsguard-event     "$DESTDIR/usr/bin/upsguard-event"
+install -Dm755 tools/upsguard-test-logger "$DESTDIR/usr/bin/upsguard-test-logger"
 install -Dm755 etc/apccontrol         "$DESTDIR/etc/upsguard/apccontrol"
 install -Dm644 etc/apcupsd.conf       "$DESTDIR/etc/upsguard/apcupsd.conf"
 install -Dm755 sv/upsguard/run        "$DESTDIR/etc/sv/upsguard/run"

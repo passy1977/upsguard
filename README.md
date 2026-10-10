@@ -12,6 +12,7 @@ battery runs low. Configured for an **APC Back-UPS BX750MI** on the server
 | File in the project       | Installed as                     | Role |
 |---------------------------|----------------------------------|------|
 | `bin/upsguard-event`      | `/usr/local/bin/upsguard-event`  | event handler: mail, then the default action of apcupsd |
+| `tools/upsguard-test-logger` | `/usr/local/bin/upsguard-test-logger` | records the UPS status during a power test |
 | `etc/apccontrol`          | `/etc/upsguard/apccontrol`       | called by apcupsd for every event, runs `upsguard-event` |
 | `etc/apcupsd.conf`        | `/etc/upsguard/apcupsd.conf`     | apcupsd configuration (UPS, shutdown thresholds) |
 | `sv/upsguard/run`         | `/etc/sv/upsguard/run`           | runit service running apcupsd with that configuration |
@@ -161,8 +162,24 @@ cat /var/log/apcupsd.events              # event history
 grep apcupsd /var/log/socklog/daemon/current   # apcupsd log
 ```
 
-To test a real power failure, unplug the UPS from the wall for a minute: you
-get the `ON BATTERY` mail and, after plugging it back in, `power restored`.
+## Power test
+
+The network may go down during the test (if the router is not on the UPS), so
+first start the logger detached from the session:
+
+```sh
+setsid nohup upsguard-test-logger >/dev/null 2>&1 </dev/null &
+```
+
+It records `STATUS`, `LINEV`, `BCHARGE` and `TIMELEFT` every 2 seconds for 15
+minutes in `~/upsguard-test.log` (`upsguard-test-logger [minutes] [file]`).
+Then unplug the UPS from the wall for two minutes and plug it back in.
+
+Expected: the `ON BATTERY` mail after about 6 seconds, `power restored` when the
+power returns, and the system stays up (`uptime`). If the UPS sends the false
+`LOWBATT`, `shutdown cancelled` arrives about 30 seconds after the power failure.
+
+Results of past tests are in [tests/](tests/).
 
 ## Uninstallation
 

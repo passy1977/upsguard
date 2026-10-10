@@ -23,6 +23,6 @@ fi
 
 rm -rf /etc/sv/upsguard
 rm -f /etc/upsguard/apccontrol
-rm -f /usr/local/bin/upsguard-event
+rm -f /usr/local/bin/upsguard-event /usr/local/bin/upsguard-test-logger
 
 echo "removed; the UPS is no longer monitored"
