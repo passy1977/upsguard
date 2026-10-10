@@ -25,6 +25,8 @@ COMM_GRACE=120                              # seconds of lost USB link before th
                                             # (hides the short loss after a resume)
 BATT_GRACE=60                               # seconds of battery detached before the mail
                                             # (the BX series reports spurious detaches)
+CHANGEME_GRACE=120                          # seconds before checking the "replace battery" flag
+                                            # (the BX series raises it for an instant)
 CHANGEME_REPEAT_MIN=1440                    # repeat the "replace battery" mail once a day
 MAIL_WAIT=30                                # seconds to wait for postfix before shutdown
 
@@ -173,11 +175,17 @@ case "$EVENT" in
         ;;
 
     changeme)
-        mark="$STATE_DIR/changeme"
-        if [ -z "$(find "$mark" -mmin -"$CHANGEME_REPEAT_MIN" 2>/dev/null)" ]; then
-            touch "$mark"
-            send_mail "REPLACE BATTERY" "The batteries of $UPS have failed: replace them."
-        fi
+        # Mail only if apcupsd still reports the flag after CHANGEME_GRACE seconds
+        (
+            sleep "$CHANGEME_GRACE"
+            flag="$(apcaccess -p STATFLAG 2>/dev/null | tr -d ' ')"
+            [ -n "$flag" ] && [ $(( flag & 0x80 )) -ne 0 ] || exit 0
+            mark="$STATE_DIR/changeme"
+            if [ -z "$(find "$mark" -mmin -"$CHANGEME_REPEAT_MIN" 2>/dev/null)" ]; then
+                touch "$mark"
+                send_mail "REPLACE BATTERY" "The batteries of $UPS have failed: replace them."
+            fi
+        ) </dev/null >/dev/null 2>&1 &
         ;;
 
     battdetach)

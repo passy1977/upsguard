@@ -13,7 +13,7 @@
 set -e
 
 VERSION="1.0"
-REVISION="3"
+REVISION="4"
 PKGVER="upsguard-${VERSION}_${REVISION}"
 
 TOP="$(cd "$(dirname "$0")/../.." && pwd)"

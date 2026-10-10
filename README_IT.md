@@ -40,7 +40,7 @@ esegue `upsguard-event`:
 | `commfailure` (> 120 s)       | `[host] UPS: communication lost`     |
 | `commok` (dopo il precedente) | `[host] UPS: communication restored` |
 | `loadlimit`, `runlimit`, `timeout`, `failing`, `emergency`, `remotedown` | `[host] UPS: SHUTDOWN` |
-| `changeme` (una volta al giorno) | `[host] UPS: REPLACE BATTERY`     |
+| `changeme` (ancora attivo dopo 120 s, una volta al giorno) | `[host] UPS: REPLACE BATTERY`     |
 | `battdetach` (> 60 s) / `battattach` | `[host] UPS: battery disconnected` / `reconnected` |
 
 Ogni mail termina con lo stato dell'UPS (`apcaccess`): carica, carico, autonomia
@@ -50,7 +50,10 @@ Una perdita del collegamento USB piu' breve di `COMM_GRACE` (120 s) non manda
 mail: succede alla ripresa dalla sospensione. Allo stesso modo un distacco della
 batteria piu' breve di `BATT_GRACE` (60 s) non manda mail: la serie BX segnala
 una coppia spuria "Battery disconnected" / "Battery reattached" ogni minuto
-circa, che resta visibile in `/var/log/apcupsd.events`.
+circa, che resta visibile in `/var/log/apcupsd.events`. A volte lo stesso
+disturbo attiva per un istante "UPS battery must be replaced": `changeme` manda
+la mail solo se il flag (bit 0x80 di `STATFLAG`) e' ancora attivo dopo 120
+secondi.
 
 `doshutdown`, `doreboot` e `killpower` vengono passati a `/etc/apcupsd/apccontrol`
 del pacchetto. Prima di `doshutdown` lo script aspetta fino a 30 secondi che
