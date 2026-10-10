@@ -29,8 +29,9 @@ fi
 install -d -m 755 /etc/xbps.d
 install -m 644 xbps.d/upsguard.conf /etc/xbps.d/upsguard.conf
 
-if ! xbps-query apcupsd >/dev/null 2>&1; then
-    xbps-install -S apcupsd
+# libusb: needed by libusb-compat at runtime, but not declared by the package
+if ! xbps-query apcupsd >/dev/null 2>&1 || ! xbps-query libusb >/dev/null 2>&1; then
+    xbps-install -S apcupsd libusb
 fi
 
 install -m 644 .env /etc/upsguard.env

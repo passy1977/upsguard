@@ -13,7 +13,7 @@
 set -e
 
 VERSION="1.0"
-REVISION="1"
+REVISION="2"
 PKGVER="upsguard-${VERSION}_${REVISION}"
 
 TOP="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -49,7 +49,7 @@ xbps-create \
     -S "Runs apcupsd for an APC UPS on USB, mails power failures, restores,
 communication losses and battery alarms, and shuts the system down cleanly
 when the battery runs low, keeping postfix as the mail transport." \
-    -D "apcupsd>=0" \
+    -D "apcupsd>=0 libusb>=0" \
     -F "/etc/upsguard/apcupsd.conf /etc/upsguard.env /etc/xbps.d/upsguard.conf" \
     -l "GPL-2.0-only" \
     "$DESTDIR"

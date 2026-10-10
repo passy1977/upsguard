@@ -97,7 +97,10 @@ confirmation: check that postfix is **not** in the list of packages to remove),
 the scripts, `.env` as `/etc/upsguard.env`, disables the `apcupsd` service if
 enabled and enables `upsguard`.
 
-Dependencies: `apcupsd`, `postfix` (or another `sendmail`).
+Dependencies: `apcupsd`, `libusb`, `postfix` (or another `sendmail`). `libusb`
+is needed by `libusb-compat` at runtime but is not a dependency of the Void
+package: without it apcupsd exits with
+`error while loading libusb-1.0.so.0`.
 
 ### Void Linux package
 
