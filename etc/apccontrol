@@ -1,0 +1,9 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 Antonio Salsi
+#
+# /etc/upsguard/apccontrol - called by apcupsd (SCRIPTDIR /etc/upsguard)
+# for every event; hands it to upsguard-event.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+exec upsguard-event "$@"

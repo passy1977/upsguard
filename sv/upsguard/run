@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 Antonio Salsi
+# runit service: install as /etc/sv/upsguard/run
+# Replaces the apcupsd service of the package, which must stay disabled.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+# Flag left by a shutdown on low battery: the system is up again
+rm -f /etc/apcupsd/powerfail
+exec apcupsd -b -f /etc/upsguard/apcupsd.conf 2>&1

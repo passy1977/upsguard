@@ -1,0 +1,190 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 Antonio Salsi
+#
+# upsguard-event - apcupsd event handler with mail notification
+#
+# Called by apcupsd through /etc/upsguard/apccontrol as
+#   upsguard-event <event> <upsname> <connected> <powered>
+#
+# Sends a mail for the events that matter, then hands the events with a real
+# action (doshutdown, doreboot, killpower) to the apccontrol of the apcupsd
+# package.
+#
+# Usage (as root, by hand):
+#   upsguard-event --test       send a test mail with the UPS status
+#   upsguard-event --stdout     print the UPS status, send nothing
+
+# ---------------------------------------------------------------- configuration
+
+MAILTO="root"                               # overridden by /etc/upsguard.env
+
+APCCONTROL="/etc/apcupsd/apccontrol"        # apccontrol of the apcupsd package
+STATE_DIR="/run/upsguard"                   # state between events (cleared at boot)
+COMM_GRACE=120                              # seconds of lost USB link before the mail
+                                            # (hides the short loss after a resume)
+CHANGEME_REPEAT_MIN=1440                    # repeat the "replace battery" mail once a day
+MAIL_WAIT=30                                # seconds to wait for postfix before shutdown
+
+[ -r /etc/upsguard.env ] && . /etc/upsguard.env
+
+# ------------------------------------------------------------------------------
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+LC_ALL=C
+export LC_ALL
+
+EVENT="$1"
+UPS="${2:-UPS}"
+HOST="$(hostname)"
+
+status() {
+    echo "Host:  $HOST"
+    echo "Date:  $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo
+    if command -v apcaccess >/dev/null 2>&1; then
+        apcaccess 2>&1 | grep -E '^(MODEL|STATUS|LINEV|LOADPCT|BCHARGE|TIMELEFT|MBATTCHG|MINTIMEL|BATTDATE|NUMXFERS|LASTXFER|XONBATT|TONBATT|CUMONBATT)'
+    else
+        echo "apcaccess not found"
+    fi
+}
+
+send_mail() {
+    subject="$1"
+    shift
+    {
+        printf 'To: %s\n' "$MAILTO"
+        printf 'Subject: [%s] UPS: %s\n' "$HOST" "$subject"
+        printf 'Content-Type: text/plain; charset=UTF-8\n'
+        printf '\n'
+        printf '%s\n' "$@"
+        echo
+        status
+    } | sendmail -t
+}
+
+# Waits for postfix to deliver the mail ($MAIL_WAIT seconds at most)
+flush_mail() {
+    command -v postqueue >/dev/null 2>&1 || return 0
+    postqueue -f 2>/dev/null
+    i=0
+    while [ "$i" -lt "$MAIL_WAIT" ]; do
+        postqueue -p 2>/dev/null | grep -q 'queue is empty' && return 0
+        sleep 1
+        i=$(( i + 1 ))
+    done
+}
+
+delegate() {
+    [ -x "$APCCONTROL" ] && exec "$APCCONTROL" "$@"
+    echo "upsguard-event: $APCCONTROL not found" >&2
+    exit 1
+}
+
+mkdir -p "$STATE_DIR"
+
+case "$EVENT" in
+    --test)
+        send_mail "test" "Test mail from upsguard-event."
+        ;;
+
+    --stdout)
+        status
+        ;;
+
+    onbattery)
+        touch "$STATE_DIR/onbattery"
+        send_mail "ON BATTERY" "Power failure: $UPS is running on batteries."
+        ;;
+
+    offbattery)
+        if [ -e "$STATE_DIR/onbattery" ]; then
+            rm -f "$STATE_DIR/onbattery"
+            send_mail "power restored" "Power has returned on $UPS."
+        fi
+        ;;
+
+    commfailure)
+        # A short loss of the USB link (e.g. on resume from suspend) is normal:
+        # mail only if the link is still down after COMM_GRACE seconds
+        date +%s > "$STATE_DIR/commfailure"
+        (
+            sleep "$COMM_GRACE"
+            if [ -e "$STATE_DIR/commfailure" ] && [ ! -e "$STATE_DIR/commfailure.mailed" ]; then
+                touch "$STATE_DIR/commfailure.mailed"
+                send_mail "communication lost" \
+                    "Communication with $UPS lost for more than $COMM_GRACE seconds." \
+                    "A shutdown on low battery is NOT possible until it comes back."
+            fi
+        ) </dev/null >/dev/null 2>&1 &
+        ;;
+
+    commok)
+        rm -f "$STATE_DIR/commfailure"
+        if [ -e "$STATE_DIR/commfailure.mailed" ]; then
+            rm -f "$STATE_DIR/commfailure.mailed"
+            send_mail "communication restored" "Communication with $UPS restored."
+        fi
+        ;;
+
+    failing)
+        send_mail "SHUTDOWN" "Battery power exhausted on $UPS. Shutting down."
+        ;;
+
+    loadlimit)
+        send_mail "SHUTDOWN" "Battery charge below BATTERYLEVEL on $UPS. Shutting down."
+        ;;
+
+    runlimit)
+        send_mail "SHUTDOWN" "Battery runtime below MINUTES on $UPS. Shutting down."
+        ;;
+
+    timeout)
+        send_mail "SHUTDOWN" "Time on battery exceeded TIMEOUT on $UPS. Shutting down."
+        ;;
+
+    emergency)
+        send_mail "SHUTDOWN" "Emergency shutdown: possible battery failure on $UPS."
+        ;;
+
+    remotedown)
+        send_mail "SHUTDOWN" "Remote shutdown requested."
+        ;;
+
+    changeme)
+        mark="$STATE_DIR/changeme"
+        if [ -z "$(find "$mark" -mmin -"$CHANGEME_REPEAT_MIN" 2>/dev/null)" ]; then
+            touch "$mark"
+            send_mail "REPLACE BATTERY" "The batteries of $UPS have failed: replace them."
+        fi
+        ;;
+
+    battdetach)
+        send_mail "battery disconnected" "The battery of $UPS has been disconnected."
+        ;;
+
+    battattach)
+        send_mail "battery reconnected" "The battery of $UPS has been reconnected."
+        ;;
+
+    doshutdown)
+        flush_mail
+        delegate "$@"
+        ;;
+
+    doreboot|killpower)
+        delegate "$@"
+        ;;
+
+    powerout|mainsback|annoyme|startselftest|endselftest)
+        ;;
+
+    *)
+        echo "Usage: upsguard-event --test|--stdout" >&2
+        echo "       (events are sent by apcupsd)" >&2
+        exit 2
+        ;;
+esac
+
+exit 0
